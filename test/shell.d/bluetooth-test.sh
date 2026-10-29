@@ -16,9 +16,10 @@ assert(bluetooth.hasHumanName({ deviceName: 'MX Master 3S' }), 'bluetooth accept
 const devices = [
   { name: 'Speaker', connected: false, paired: true, address: '2' },
   { name: 'Headphones', connected: true, address: '1' },
-  { name: 'Keyboard', connected: false, address: '3' },
+  { name: 'Keyboard', connected: false, address: '3', icon: 'input-keyboard' },
   { name: 'AA:BB:CC:DD:EE:FF', connected: true, address: '4' },
-  { name: 'Mouse', connected: false, trusted: true, address: '5' }
+  { name: 'Mouse', connected: false, trusted: true, address: '5' },
+  { name: 'Streetlight', connected: false, address: '9' }
 ]
 
 const arrayLikeDevices = {
@@ -35,14 +36,20 @@ assertDeepEqual(
 const lists = bluetooth.deviceLists(devices)
 assertDeepEqual(lists.connected.map(bluetooth.deviceLabel), ['Headphones'], 'bluetooth groups connected devices')
 assertDeepEqual(lists.known.map(bluetooth.deviceLabel), ['Mouse', 'Speaker'], 'bluetooth groups known devices by label')
-assertDeepEqual(lists.discovered.map(bluetooth.deviceLabel), ['Keyboard'], 'bluetooth groups discovered devices')
-assertDeepEqual(bluetooth.visibleSections(lists, true), ['connected', 'known', 'discovered'], 'bluetooth shows discovered section while scanning')
-assertDeepEqual(bluetooth.visibleSections(lists, false), ['connected', 'known'], 'bluetooth hides discovered section when not scanning')
+assertDeepEqual(lists.discovered.map(bluetooth.deviceLabel), ['Keyboard'], 'bluetooth groups class-bearing discovered devices')
+assertDeepEqual(lists.other.map(bluetooth.deviceLabel), ['Streetlight'], 'bluetooth groups classless discovered devices apart')
+assertDeepEqual(bluetooth.visibleSections(lists, true, false), ['connected', 'known', 'discovered', 'otherHeader'], 'bluetooth offers the classless group while scanning')
+assertDeepEqual(bluetooth.visibleSections(lists, true, true), ['connected', 'known', 'discovered', 'otherHeader', 'other'], 'bluetooth reveals the classless group on request')
+assertDeepEqual(bluetooth.visibleSections(lists, false), ['connected', 'known'], 'bluetooth hides discovered sections when not scanning')
+assert(
+  bluetooth.deviceHasClass({ icon: 'input-keyboard' }) && !bluetooth.deviceHasClass({ icon: '' }) && !bluetooth.deviceHasClass({ icon: 'unknown' }),
+  'bluetooth treats only a real BlueZ class as identifying a device'
+)
 
 const arrayLikeLists = bluetooth.deviceLists({
   0: { name: 'Earbuds', connected: true, address: '6' },
   1: { name: 'Trackpad', paired: true, address: '7' },
-  2: { name: 'Gamepad', address: '8' },
+  2: { name: 'Gamepad', address: '8', icon: 'input-gaming' },
   length: 3
 })
 assertDeepEqual(arrayLikeLists.connected.map(bluetooth.deviceLabel), ['Earbuds'], 'bluetooth groups connected devices from array-like values')

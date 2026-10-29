@@ -99,24 +99,37 @@ function deviceRow(d) {
   }
 }
 
+// Whether BlueZ knows what this device is, from its class or the appearance
+// its advertisements carry. A keyboard, headset, or phone has one; the
+// neighborhood's bikes, bulbs, and air conditioners advertise nothing, which
+// is what makes a list of them useless to scan through. The icon is the only
+// such signal Quickshell exposes — no RSSI, service UUIDs, or address type.
+function deviceHasClass(device) {
+  var icon = String(device && device.icon || "").trim().toLowerCase()
+  return icon !== "" && icon !== "unknown"
+}
+
 function deviceLists(devices) {
   var values = toArray(devices)
   var connected = []
   var known = []
   var discovered = []
+  var other = []
 
   for (var i = 0; i < values.length; i++) {
     var d = values[i]
     if (!d || !hasHumanName(d)) continue
     if (d.connected) connected.push(d)
     else if (d.paired || d.bonded || d.trusted) known.push(d)
-    else discovered.push(d)
+    else if (deviceHasClass(d)) discovered.push(d)
+    else other.push(d)
   }
 
   return {
     connected: sortedByLabel(connected),
     known: sortedByLabel(known),
-    discovered: sortedByLabel(discovered)
+    discovered: sortedByLabel(discovered),
+    other: sortedByLabel(other)
   }
 }
 
@@ -138,11 +151,15 @@ function withPendingAction(actions, address, action) {
   return next
 }
 
-function visibleSections(lists, discovering) {
+function visibleSections(lists, discovering, showOther) {
   var sections = []
   if (lists && lists.connected && lists.connected.length > 0) sections.push("connected")
   if (lists && lists.known && lists.known.length > 0) sections.push("known")
   if (discovering && lists && lists.discovered && lists.discovered.length > 0) sections.push("discovered")
+  if (discovering && lists && lists.other && lists.other.length > 0) {
+    sections.push("otherHeader")
+    if (showOther) sections.push("other")
+  }
   return sections
 }
 
@@ -151,6 +168,7 @@ function sectionDevices(lists, section) {
   if (section === "connected") return lists.connected || []
   if (section === "known") return lists.known || []
   if (section === "discovered") return lists.discovered || []
+  if (section === "other") return lists.other || []
   return []
 }
 
@@ -175,7 +193,8 @@ function scrollRowValues(row) {
     pairing: !!dev.pairing,
     section: row.section || "",
     indexInSection: row.indexInSection !== undefined ? row.indexInSection : 0,
-    first: row.first === true
+    first: row.first === true,
+    toggle: row.toggle === true
   }
 }
 
@@ -235,6 +254,7 @@ if (typeof module !== "undefined") {
     nodeText: nodeText,
     bluetoothSinkMatchesDevice: bluetoothSinkMatchesDevice,
     sortedByLabel: sortedByLabel,
+    deviceHasClass: deviceHasClass,
     deviceRow: deviceRow,
     deviceLists: deviceLists,
     cloneMap: cloneMap,

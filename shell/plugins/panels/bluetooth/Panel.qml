@@ -55,6 +55,12 @@ Panel {
   readonly property var connectedDevices: deviceGroups.connected || []
   readonly property var knownDevices: deviceGroups.known || []
   readonly property var discoveredDevices: deviceGroups.discovered || []
+  // Unremembered devices that advertise no class at all. They are most of a
+  // busy room's broadcasts — bikes, bulbs, air conditioners — and none of
+  // them is what someone opens this panel to pair, so they stay collapsed
+  // behind a single row until asked for.
+  readonly property var otherDevices: deviceGroups.other || []
+  property bool showOtherDevices: false
 
   readonly property string icon: {
     if (!adapter) return ""
@@ -115,6 +121,8 @@ Panel {
     if (section === "connected") return connectedDevices.length
     if (section === "known") return knownDevices.length
     if (section === "discovered") return discoveredDevices.length
+    if (section === "otherHeader") return 1
+    if (section === "other") return otherDevices.length
     return 0
   }
 
@@ -122,11 +130,13 @@ Panel {
     if (section === "connected") return connectedDevices.length > 0
     if (section === "known") return knownDevices.length > 0
     if (section === "discovered") return adapter && adapter.discovering && discoveredDevices.length > 0
+    if (section === "otherHeader") return adapter && adapter.discovering && otherDevices.length > 0
+    if (section === "other") return showOtherDevices && sectionVisible("otherHeader")
     return false
   }
 
   readonly property var visibleSections: {
-    return Model.visibleSections(deviceGroups, adapter && adapter.discovering)
+    return Model.visibleSections(deviceGroups, adapter && adapter.discovering, showOtherDevices)
   }
 
   function devicesForSection(section) {
@@ -137,7 +147,8 @@ Panel {
   // scan turned up — flattened into one list so a ListView can own the
   // viewport. Each entry carries the section it came from, which is what lets
   // the delegate and the cursor keep working in section-relative terms, and
-  // `first` marks the row that opens its section.
+  // `first` marks the row that opens its section. The classless group is its
+  // own one-row section whose row is the disclosure that reveals it.
   readonly property var scrollRows: {
     var rows = []
     for (var k = 0; k < knownDevices.length; k++)
@@ -145,6 +156,12 @@ Panel {
     if (sectionVisible("discovered"))
       for (var d = 0; d < discoveredDevices.length; d++)
         rows.push({ dev: Model.deviceRow(discoveredDevices[d]), section: "discovered", indexInSection: d, first: d === 0 })
+    if (sectionVisible("otherHeader")) {
+      rows.push({ dev: null, section: "otherHeader", indexInSection: 0, first: false, toggle: true })
+      if (showOtherDevices)
+        for (var o = 0; o < otherDevices.length; o++)
+          rows.push({ dev: Model.deviceRow(otherDevices[o]), section: "other", indexInSection: o, first: false })
+    }
     return rows
   }
 
@@ -184,7 +201,7 @@ Panel {
   // Flat position of the keyboard cursor, or -1 while it sits on the hero or
   // in the connected list (both of which live outside the scroll area).
   readonly property int scrollRowIndex: {
-    if (focusSection !== "known" && focusSection !== "discovered") return -1
+    if (focusSection === "header" || focusSection === "connected") return -1
     for (var i = 0; i < scrollRows.length; i++)
       if (scrollRows[i].section === focusSection && scrollRows[i].indexInSection === selectedIndex) return i
     return -1
@@ -385,6 +402,10 @@ Panel {
       deleteSelected()
       return
     }
+    if (focusSection === "otherHeader") {
+      toggleOtherDevices()
+      return
+    }
 
     if (focusSection === "connected" || focusSection === "known") {
       var dev = deviceAt(focusSection, selectedIndex)
@@ -397,6 +418,23 @@ Panel {
       var d = discoveredDevices[selectedIndex]
       if (!d) return
       connectDevice(d)
+    }
+    if (focusSection === "other") {
+      var o = otherDevices[selectedIndex]
+      if (!o) return
+      connectDevice(o)
+    }
+  }
+
+  // Reveal or hide the devices that advertise no class. Collapsing with the
+  // cursor inside them parks it on the disclosure row, instead of letting the
+  // clamp drop it back at the top of the list.
+  function toggleOtherDevices() {
+    showOtherDevices = !showOtherDevices
+    actionFocused = false
+    if (!showOtherDevices && focusSection === "other") {
+      selectedIndex = 0
+      focusSection = "otherHeader"
     }
   }
 
@@ -415,9 +453,11 @@ Panel {
       // from another monitor, or one leaked by an instance that could not
       // finish its own stop — so this close settles it either way.
       if (adapter !== null && adapter.discovering) owesDiscoveryStop = true
+      showOtherDevices = false
       if (connectedDevices.length > 0) { focusSection = "connected"; selectedIndex = 0 }
       else if (knownDevices.length > 0) { focusSection = "known"; selectedIndex = 0 }
       else if (discoveredDevices.length > 0) { focusSection = "discovered"; selectedIndex = 0 }
+      else if (otherDevices.length > 0) { focusSection = "otherHeader"; selectedIndex = 0 }
       else { focusSection = "header" }
       actionFocused = false
       cursorActive = false
@@ -448,7 +488,7 @@ Panel {
       return
     }
 
-    var sections = ["connected", "known", "discovered"]
+    var sections = ["connected", "known", "discovered", "other"]
     for (var s = 0; s < sections.length; s++) {
       var section = sections[s]
       if (!sectionVisible(section)) continue
@@ -848,6 +888,7 @@ Panel {
             required property real battery
             required property bool pairing
             required property bool first
+            required property bool toggle
 
             // DeviceRow works with the same primitives-only projection the
             // connected list uses. Not named `dev`: inside DeviceRow's binding
@@ -875,8 +916,8 @@ Panel {
               spacing: Style.space(10)
 
               PanelSeparator {
-                visible: index > 0 && first
-                height: index > 0 && first ? implicitHeight : 0
+                visible: index > 0 && (first || toggle)
+                height: index > 0 && (first || toggle) ? implicitHeight : 0
                 foreground: root.bar.foreground
               }
 
@@ -890,10 +931,18 @@ Panel {
 
               DeviceRow {
                 width: parent.width
+                visible: !toggle
+                height: toggle ? 0 : implicitHeight
                 dev: rowDev
                 rowIndex: indexInSection
                 sectionName: section
                 isDiscovered: section === "discovered"
+              }
+
+              OtherDevicesRow {
+                width: parent.width
+                visible: toggle
+                height: toggle ? implicitHeight : 0
               }
             }
           }
@@ -1074,6 +1123,62 @@ Panel {
           if (!dev) return
           root.forgetDevice(dev)
         }
+      }
+    }
+  }
+
+  // The disclosure row that reveals the devices advertising no class at all.
+  // It is its own one-row section so j/k can reach it, and Enter, like a
+  // click, opens and closes the group.
+  component OtherDevicesRow: CursorSurface {
+    id: otherRow
+
+    readonly property bool rowSelected: root.cursorActive && root.focusSection === "otherHeader"
+    readonly property string disclosure: root.showOtherDevices
+      ? "󰅀"
+      : (Commons.I18n.rightToLeft ? "󰅁" : "󰅂")
+
+    hasCursor: rowSelected
+    current: false
+    foreground: root.bar.foreground
+    fill: root.hoverFill
+    currentFill: root.selectedFill
+
+    implicitHeight: otherRowContent.implicitHeight + Style.spacing.rowPaddingX
+
+    MouseArea {
+      id: otherRowMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onContainsMouseChanged: if (containsMouse) {
+        root.cursorActive = true
+        root.focusSection = "otherHeader"
+        root.selectedIndex = 0
+        root.actionFocused = false
+      }
+      onClicked: root.toggleOtherDevices()
+    }
+
+    Item {
+      id: otherRowContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(10)
+      implicitHeight: otherRowLabel.implicitHeight
+
+      Text {
+        id: otherRowLabel
+        textFormat: Text.PlainText
+        text: otherRow.disclosure + "  " + Commons.I18n.t("bluetooth.otherDevices")
+              + " (" + Commons.I18n.formatNumber(root.otherDevices.length) + ")"
+        color: Qt.darker(root.bar.foreground, 1.3)
+        font.family: root.bar.fontFamily
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+        width: parent.width
       }
     }
   }
